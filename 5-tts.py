@@ -122,61 +122,97 @@ async def process_segments(data, voice, output_dir, limit=None, offset=0):
         segments = segments[offset:]
     if limit:
         segments = segments[:limit]
-        
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-        
+
+    # Lazy-initialize LLM client only if API key is available
+    api_key = os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("OPENAI_BASE_URL")
+    llm_client = OpenAI(api_key=api_key, base_url=base_url) if api_key else None
+
     for i, seg in enumerate(segments):
         seg_id = seg.get("id", i)
         text = seg.get("dubbing", seg.get("translation", ""))
         if not text:
             print(f"Skipping segment {seg_id}: No text found.")
             continue
-            
+
         t_target = seg.get("duration", 0)
         if t_target <= 0:
             print(f"Skipping segment {seg_id}: Zero duration.")
             continue
-            
-        # 1.2 Estimate base duration (4 chars/s)
-        # Count Chinese characters and digits
-        char_count = len(re.findall(r'[\u4e00-\u9fff0-9]', text))
-        # Add some buffer for English words if any
-        eng_word_count = len(re.findall(r'[a-zA-Z]+', text))
-        total_estimate_count = char_count + (eng_word_count * 0.5) # English words are usually faster
-        
-        t_base = total_estimate_count / 4.0
-        
-        # 1.3 Compute required speed-up ratio
-        r_need = t_base / t_target
-        
-        # 1.4 Inject TTS parameters
-        rate_param = "+0%"
-        if r_need > 1.05:
-            rate_param = "+20%"
-            
-        print(f"Processing segment {seg_id}: '{text[:20]}...'")
-        print(f"  Target: {t_target}s, Base: {t_base:.2f}s, Ratio: {r_need:.2f}, TTS Rate: {rate_param}")
-        
-        temp_path = os.path.join(output_dir, f"seg_{seg_id}_temp.mp3")
+
         final_path = os.path.join(output_dir, f"seg_{seg_id}.wav")
-        
-        # 1.5 Generate & validate
-        await generate_tts(text, voice, rate_param, temp_path)
-        t_actual = get_audio_duration(temp_path)
-        print(f"  Actual TTS duration: {t_actual:.2f}s")
-        
-        # 1.6 Final alignment (FFmpeg)
-        success = apply_atempo(temp_path, final_path, t_target)
-        if success:
-            t_final = get_audio_duration(final_path)
-            print(f"  Final aligned duration: {t_final:.2f}s")
-        else:
-            print(f"  Failed to align segment {seg_id}")
-            
-        # Cleanup temp file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        current_dubbing = text
+
+        # Track all attempts: list of (ratio, temp_path, dubbing_used)
+        attempts = []
+
+        for attempt in range(MAX_RETRIES + 1):
+            temp_path = os.path.join(output_dir, f"seg_{seg_id}_temp_{attempt}.mp3")
+
+            # Determine TTS rate: pre-estimate to nudge speed
+            char_count = len(re.findall(r'[\u4e00-\u9fff0-9]', current_dubbing))
+            eng_word_count = len(re.findall(r'[a-zA-Z]+', current_dubbing))
+            total_estimate = char_count + (eng_word_count * 0.5)
+            t_base = total_estimate / 4.0
+            r_pre = t_base / t_target if t_target > 0 else 1.0
+            rate_param = "+20%" if r_pre > 1.05 else "+0%"
+
+            print(f"  Attempt {attempt + 1}/{MAX_RETRIES + 1} for seg {seg_id}: '{current_dubbing[:20]}...'")
+            await generate_tts(current_dubbing, voice, rate_param, temp_path)
+            t_actual = get_audio_duration(temp_path)
+
+            if t_actual == 0:
+                print(f"  Warning: Could not measure duration for attempt {attempt + 1}. Skipping.")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                break
+
+            ratio = t_actual / t_target
+            print(f"  Actual: {t_actual:.2f}s, Target: {t_target:.2f}s, Ratio: {ratio:.2f}")
+            attempts.append((ratio, temp_path, current_dubbing))
+
+            if ATEMPO_MIN <= ratio <= ATEMPO_MAX:
+                # Good ratio — apply atempo and finish
+                success = apply_atempo(temp_path, final_path, t_target)
+                if success:
+                    t_final = get_audio_duration(final_path)
+                    print(f"  Aligned duration: {t_final:.2f}s")
+                else:
+                    print(f"  Failed to align segment {seg_id}")
+                os.remove(temp_path)
+                break
+
+            # Ratio out of range
+            if attempt < MAX_RETRIES and llm_client:
+                print(f"  Ratio {ratio:.2f} out of range [{ATEMPO_MIN}, {ATEMPO_MAX}]. Rewriting dubbing...")
+                seg["dubbing"] = current_dubbing  # ensure seg has current value for rewrite_dubbing
+                new_dubbing = rewrite_dubbing(llm_client, seg, t_actual, t_target)
+                print(f"  Rewritten: '{new_dubbing[:40]}...' ({len(new_dubbing)} chars)")
+                current_dubbing = new_dubbing
+                os.remove(temp_path)
+            else:
+                # No LLM or retries exhausted — pick best attempt
+                best_ratio, best_temp, best_dubbing = min(attempts, key=lambda x: abs(x[0] - 1.0))
+                print(f"  Retries exhausted. Using best attempt (ratio={best_ratio:.2f}). Marking atempo_warning.")
+                seg["atempo_warning"] = True
+                seg["atempo_retries"] = attempt + 1
+                seg["dubbing"] = best_dubbing
+                # Clean up all other temp files
+                for r, tp, _ in attempts:
+                    if tp != best_temp and os.path.exists(tp):
+                        os.remove(tp)
+                success = apply_atempo(best_temp, final_path, t_target)
+                if success:
+                    t_final = get_audio_duration(final_path)
+                    print(f"  Forced aligned duration: {t_final:.2f}s")
+                else:
+                    print(f"  Failed to align segment {seg_id}")
+                if os.path.exists(best_temp):
+                    os.remove(best_temp)
+                break
 
 async def main():
     parser = argparse.ArgumentParser(description="Generate TTS for translated segments.")
