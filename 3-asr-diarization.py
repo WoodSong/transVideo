@@ -80,7 +80,7 @@ def main():
     parser.add_argument("audio_file", help="Path to the audio file to process.")
     parser.add_argument("--device", default="cpu", help="Device to use (cpu, cuda, mps). Default: cpu.")
     parser.add_argument("--model", default="large-v3", help="Whisper model to use. Default: large-v3.")
-    parser.add_argument("--token", default="HUGGINGFACE_TOKEN_REMOVED", help="Hugging Face access token for diarization.")
+    parser.add_argument("--token", default=None, help="Hugging Face access token for diarization.")
     parser.add_argument("--output", help="Path to the output JSON file. Default: [audio_file]_transcription.json")
 
     args = parser.parse_args()
