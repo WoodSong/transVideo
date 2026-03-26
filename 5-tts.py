@@ -220,6 +220,104 @@ async def process_segments(data, voice, output_dir, limit=None, offset=0):
                     os.remove(best_temp)
                 break
 
+async def smooth_neighbors(segments, llm_client, voice, output_dir):
+    """
+    One-pass neighbor smoothing: if two adjacent segments have ratio difference
+    > NEIGHBOR_RATIO_DIFF, rewrite the one farther from 1.0 and regenerate its TTS.
+    Only runs when an LLM client is available.
+    """
+    if not llm_client:
+        return
+
+    # Build list of (index, seg) for segments that have a recorded ratio
+    indexed = [(i, seg) for i, seg in enumerate(segments) if "ratio" in seg]
+
+    for k in range(len(indexed) - 1):
+        idx_a, seg_a = indexed[k]
+        idx_b, seg_b = indexed[k + 1]
+
+        ratio_a = seg_a["ratio"]
+        ratio_b = seg_b["ratio"]
+
+        if abs(ratio_a - ratio_b) <= NEIGHBOR_RATIO_DIFF:
+            continue
+
+        # Pick the segment farther from 1.0
+        if abs(ratio_a - 1.0) >= abs(ratio_b - 1.0):
+            target_seg = seg_a
+        else:
+            target_seg = seg_b
+
+        seg_id = target_seg.get("id", "?")
+        t_target = target_seg.get("duration", 0)
+        if t_target <= 0:
+            continue
+
+        print(f"  [smooth] seg {seg_id}: neighbor ratio diff "
+              f"{ratio_a:.2f} vs {ratio_b:.2f}. Rewriting seg {seg_id} (ratio={target_seg['ratio']:.2f})...")
+
+        final_path = os.path.join(output_dir, f"seg_{seg_id}.wav")
+        current_dubbing = target_seg.get("dubbing", "")
+        attempts = []
+
+        for attempt in range(MAX_RETRIES + 1):
+            temp_path = os.path.join(output_dir, f"seg_{seg_id}_smooth_{attempt}.mp3")
+
+            char_count = len(re.findall(r'[\u4e00-\u9fff0-9]', current_dubbing))
+            eng_word_count = len(re.findall(r'[a-zA-Z]+', current_dubbing))
+            total_estimate = char_count + (eng_word_count * 0.5)
+            t_base = total_estimate / 4.0
+            r_pre = t_base / t_target if t_target > 0 else 1.0
+            rate_param = "+20%" if r_pre > 1.05 else "+0%"
+
+            print(f"    Attempt {attempt + 1}/{MAX_RETRIES + 1}: '{current_dubbing[:20]}...'")
+            await generate_tts(current_dubbing, voice, rate_param, temp_path)
+            t_actual = get_audio_duration(temp_path)
+
+            if t_actual <= 0:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                for _, tp, _ in attempts:
+                    if os.path.exists(tp):
+                        os.remove(tp)
+                break
+
+            ratio = t_actual / t_target
+            print(f"    Actual: {t_actual:.2f}s, Target: {t_target:.2f}s, Ratio: {ratio:.2f}")
+            attempts.append((ratio, temp_path, current_dubbing))
+
+            if ATEMPO_MIN <= ratio <= ATEMPO_MAX:
+                success = apply_atempo(temp_path, final_path, t_target)
+                if success:
+                    t_final = get_audio_duration(final_path)
+                    print(f"    Smoothed aligned duration: {t_final:.2f}s")
+                os.remove(temp_path)
+                target_seg["dubbing"] = current_dubbing
+                target_seg["ratio"] = ratio
+                # Update indexed list so subsequent pairs use the new ratio
+                indexed[k if target_seg is seg_a else k + 1] = (
+                    idx_a if target_seg is seg_a else idx_b, target_seg
+                )
+                break
+
+            if attempt < MAX_RETRIES:
+                target_seg["dubbing"] = current_dubbing
+                new_dubbing = rewrite_dubbing(llm_client, target_seg, t_actual, t_target)
+                print(f"    Rewritten: '{new_dubbing[:40]}...' ({len(new_dubbing)} chars)")
+                current_dubbing = new_dubbing
+            else:
+                best_ratio, best_temp, best_dubbing = min(attempts, key=lambda x: abs(x[0] - 1.0))
+                for r, tp, _ in attempts:
+                    if tp != best_temp and os.path.exists(tp):
+                        os.remove(tp)
+                apply_atempo(best_temp, final_path, t_target)
+                if os.path.exists(best_temp):
+                    os.remove(best_temp)
+                target_seg["dubbing"] = best_dubbing
+                target_seg["ratio"] = best_ratio
+                print(f"    Smooth retries exhausted. Best ratio={best_ratio:.2f}")
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Generate TTS for translated segments.")
     parser.add_argument("input_file", help="Path to the translated JSON file.")
