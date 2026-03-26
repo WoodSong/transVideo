@@ -11,9 +11,10 @@ from openai import OpenAI
 
 load_dotenv()
 
-ATEMPO_MIN = 0.75
-ATEMPO_MAX = 1.50
+ATEMPO_MIN = 0.85
+ATEMPO_MAX = 1.20
 MAX_RETRIES = 3
+NEIGHBOR_RATIO_DIFF = 0.30
 
 def get_audio_duration(file_path):
     """
