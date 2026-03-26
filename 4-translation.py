@@ -22,10 +22,10 @@ SYSTEM_PROMPT = """
 
 2. **时长对齐 (Duration Constraint) - CRITICAL**:
    - 输入数据中包含 `duration` (秒)。
-   - **中文语速标准**: 这里的 TTS 语速约为 **每秒 3-4 个汉字**。
+   - **中文语速标准**: 这里的 TTS 语速约为 **每秒 4-5 个汉字**。
    - 必须根据 `duration` 控制 `dubbing` 的字数：
-     - 如果 duration = 1.5s -> 中文控制在 4-6 字左右。
-     - 如果 duration = 5.0s -> 中文控制在 15-20 字左右。
+     - 如果 duration = 1.5s -> 中文控制在 6-8 字左右。
+     - 如果 duration = 5.0s -> 中文控制在 20-25 字左右。
    - 如果原文很长 but duration 很短，**必须意译/精简**，保留核心意思即可。
    - 如果原文很短 but duration 很长，适当增加语气词或填充词（如“那么...”、“也就是说...”）来填满时间。
 
@@ -45,7 +45,7 @@ SYSTEM_PROMPT = """
 }
 
 # Example
-Input: 
+Input:
 [{"id": 10, "text": "I mean, it's really complicated if you look at the details.", "duration": 1.8, "speaker": "S1"}]
 
 Correct Output:
@@ -54,7 +54,7 @@ Correct Output:
     {
       "id": 10,
       "translation": "我的意思是，如果你看细节的话，它真的很复杂。",
-      "dubbing": "细节其实特别复杂。" 
+      "dubbing": "这个细节嘛，其实挺复杂的。"
     }
   ]
 }
@@ -155,8 +155,8 @@ def refine_segment(client, model, seg):
     Refines the dubbing text if it's too long or too short.
     """
     duration = seg.get("duration", 0)
-    max_chars = int(duration * 4.2)
-    min_chars = int(duration * 2.5)
+    max_chars = int(duration * 5.0)
+    min_chars = int(duration * 3.5)
     
     dubbing = seg.get("dubbing", "").strip()
     translation = seg.get("translation", "").strip()
