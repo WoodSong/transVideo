@@ -315,7 +315,12 @@ async def smooth_neighbors(segments, llm_client, voice, output_dir):
                     os.remove(best_temp)
                 target_seg["dubbing"] = best_dubbing
                 target_seg["ratio"] = best_ratio
+                # Update indexed list so subsequent pairs use the new ratio
+                indexed[k if target_seg is seg_a else k + 1] = (
+                    idx_a if target_seg is seg_a else idx_b, target_seg
+                )
                 print(f"    Smooth retries exhausted. Best ratio={best_ratio:.2f}")
+                break
 
 
 async def main():
