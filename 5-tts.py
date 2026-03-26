@@ -348,6 +348,19 @@ async def main():
     await process_segments(data, args.voice, output_dir, args.limit, args.offset)
     print(f"Finished processing all segments. Audio saved in {output_dir}")
 
+    # Neighbor smoothing — only when processing the full segment list
+    partial_run = args.limit is not None or args.offset > 0
+    if not partial_run:
+        api_key = os.getenv("OPENAI_API_KEY")
+        base_url = os.getenv("OPENAI_BASE_URL")
+        llm_client = OpenAI(api_key=api_key, base_url=base_url) if api_key else None
+        segments = data.get("segments", [])
+        print(f"Running neighbor smoothing pass over {len(segments)} segments...")
+        await smooth_neighbors(segments, llm_client, args.voice, output_dir)
+        print("Neighbor smoothing complete.")
+    else:
+        print("Skipping neighbor smoothing (partial run).")
+
     # Write back updated dubbing/warning fields to the JSON
     with open(args.input_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
