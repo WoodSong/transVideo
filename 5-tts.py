@@ -195,7 +195,7 @@ async def process_segments(data, voice, output_dir, limit=None, offset=0):
                 new_dubbing = rewrite_dubbing(llm_client, seg, t_actual, t_target)
                 print(f"  Rewritten: '{new_dubbing[:40]}...' ({len(new_dubbing)} chars)")
                 current_dubbing = new_dubbing
-                os.remove(temp_path)
+                # Keep temp_path on disk — fallback cleanup will handle it
             else:
                 # No LLM or retries exhausted — pick best attempt
                 best_ratio, best_temp, best_dubbing = min(attempts, key=lambda x: abs(x[0] - 1.0))
