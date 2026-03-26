@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+
+# ML models (downloaded on demand)
+models/
+
+# Downloaded video/audio data
+dummy_audio/
+*.csv
+# Explicitly ignore known downloaded video folders (add new ones here)
+EOmgC3-hznM/
+
+# Agent/IDE session data
+.agent/
+.claude/
