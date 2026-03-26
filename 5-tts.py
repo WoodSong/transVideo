@@ -164,10 +164,13 @@ async def process_segments(data, voice, output_dir, limit=None, offset=0):
             await generate_tts(current_dubbing, voice, rate_param, temp_path)
             t_actual = get_audio_duration(temp_path)
 
-            if t_actual == 0:
+            if t_actual <= 0:
                 print(f"  Warning: Could not measure duration for attempt {attempt + 1}. Skipping.")
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
+                for _, tp, _ in attempts:
+                    if os.path.exists(tp):
+                        os.remove(tp)
                 break
 
             ratio = t_actual / t_target
