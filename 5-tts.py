@@ -82,12 +82,12 @@ def rewrite_dubbing(client, seg, actual_duration, target_duration):
 
     # Estimate current TTS speed (chars/sec) from actual measurement
     char_count = len(re.findall(r'[\u4e00-\u9fff0-9]', current_dubbing))
-    if char_count == 0 or actual_duration == 0:
+    if char_count == 0 or actual_duration <= 0:
         return current_dubbing
 
     chars_per_sec = char_count / actual_duration
     target_chars = int(target_duration * chars_per_sec)
-    current_chars = len(current_dubbing)
+    current_chars = char_count
 
     if current_chars > target_chars:
         instruction = f"太长了。请缩减到约 {target_chars} 字以内，保留核心意思。"
@@ -109,6 +109,7 @@ def rewrite_dubbing(client, seg, actual_duration, target_duration):
             ]
         )
         new_dubbing = response.choices[0].message.content.strip()
+        if not new_dubbing: return current_dubbing
         new_dubbing = new_dubbing.replace("`", "").strip('"').strip("'")
         return new_dubbing
     except Exception as e:
