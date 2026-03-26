@@ -187,6 +187,7 @@ async def process_segments(data, voice, output_dir, limit=None, offset=0):
                 else:
                     print(f"  Failed to align segment {seg_id}")
                 os.remove(temp_path)
+                seg["ratio"] = ratio
                 break
 
             # Ratio out of range
@@ -204,6 +205,7 @@ async def process_segments(data, voice, output_dir, limit=None, offset=0):
                 seg["atempo_warning"] = True
                 seg["atempo_retries"] = attempt + 1
                 seg["dubbing"] = best_dubbing
+                seg["ratio"] = best_ratio
                 # Clean up all other temp files
                 for r, tp, _ in attempts:
                     if tp != best_temp and os.path.exists(tp):
