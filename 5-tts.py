@@ -72,6 +72,49 @@ async def generate_tts(text, voice, rate_str, output_path):
     communicate = edge_tts.Communicate(text, voice, rate=rate_str)
     await communicate.save(output_path)
 
+def rewrite_dubbing(client, seg, actual_duration, target_duration):
+    """
+    Ask the LLM to rewrite dubbing text to better fit the target duration.
+    Returns new dubbing string, or original if LLM call fails.
+    """
+    current_dubbing = seg.get("dubbing", "").strip()
+    translation = seg.get("translation", current_dubbing)
+
+    # Estimate current TTS speed (chars/sec) from actual measurement
+    char_count = len(re.findall(r'[\u4e00-\u9fff0-9]', current_dubbing))
+    if char_count == 0 or actual_duration == 0:
+        return current_dubbing
+
+    chars_per_sec = char_count / actual_duration
+    target_chars = int(target_duration * chars_per_sec)
+    current_chars = len(current_dubbing)
+
+    if current_chars > target_chars:
+        instruction = f"太长了。请缩减到约 {target_chars} 字以内，保留核心意思。"
+    else:
+        instruction = f"太短了。请扩展到约 {target_chars} 字以上，保留核心意思，可以增加自然的口语填充词。"
+
+    try:
+        response = client.chat.completions.create(
+            model=os.getenv("LLM_MODEL", "gpt-4.1-mini"),
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是专业配音导演。直接输出优化后的配音口语稿，不需要任何开场白或格式。"
+                },
+                {
+                    "role": "user",
+                    "content": f"原意：{translation}\n当前配音稿：{current_dubbing}\n{instruction}"
+                }
+            ]
+        )
+        new_dubbing = response.choices[0].message.content.strip()
+        new_dubbing = new_dubbing.replace("`", "").strip('"').strip("'")
+        return new_dubbing
+    except Exception as e:
+        print(f"  LLM rewrite failed: {e}")
+        return current_dubbing
+
 async def process_segments(data, voice, output_dir, limit=None, offset=0):
     segments = data.get("segments", [])
     if offset > 0:
