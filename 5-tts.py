@@ -256,6 +256,11 @@ async def smooth_neighbors(segments, llm_client, voice, output_dir):
         print(f"  [smooth] seg {seg_id}: neighbor ratio diff "
               f"{ratio_a:.2f} vs {ratio_b:.2f}. Rewriting seg {seg_id} (ratio={target_seg['ratio']:.2f})...")
 
+        # Don't re-process segments that already exhausted retries in process_segments
+        if target_seg.get("atempo_warning"):
+            print(f"  [smooth] Skipping seg {seg_id} (already atempo_warning, ratio={target_seg['ratio']:.2f})")
+            continue
+
         final_path = os.path.join(output_dir, f"seg_{seg_id}.wav")
         current_dubbing = target_seg.get("dubbing", "")
         attempts = []
@@ -294,6 +299,7 @@ async def smooth_neighbors(segments, llm_client, voice, output_dir):
                 os.remove(temp_path)
                 target_seg["dubbing"] = current_dubbing
                 target_seg["ratio"] = ratio
+                target_seg.pop("atempo_warning", None)
                 # Update indexed list so subsequent pairs use the new ratio
                 indexed[k if target_seg is seg_a else k + 1] = (
                     idx_a if target_seg is seg_a else idx_b, target_seg
