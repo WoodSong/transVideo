@@ -242,5 +242,10 @@ async def main():
     await process_segments(data, args.voice, output_dir, args.limit, args.offset)
     print(f"Finished processing all segments. Audio saved in {output_dir}")
 
+    # Write back updated dubbing/warning fields to the JSON
+    with open(args.input_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+    print(f"Updated segment data written back to {args.input_file}")
+
 if __name__ == "__main__":
     asyncio.run(main())
