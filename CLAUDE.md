@@ -19,6 +19,7 @@ uv sync
 OPENAI_API_KEY=...       # Required for step 4 (translation)
 OPENAI_BASE_URL=...      # Optional: custom OpenAI-compatible endpoint
 LLM_MODEL=gpt-4.1-mini  # Optional: model override
+HF_TOKEN=...             # Required for step 3 (HuggingFace diarization)
 ```
 
 ## Running the Pipeline
@@ -69,9 +70,9 @@ URL → [1-Acquisition] → <id>/<id>.mp4
 
 **Step 3 (ASR):** ASR (Whisper) is forced to CPU/int8 for compatibility. Alignment and diarization use the device flag (mps on Apple Silicon, cuda on NVIDIA). The script patches `torch.load` to bypass PyTorch 2.6+ security defaults for model loading.
 
-**Step 4 (Translation):** Segments are merged by speaker continuity before being sent to the LLM in batches of 10. Each segment gets two outputs: `translation` (literal, for QA) and `dubbing` (colloquial, for TTS). A refinement pass adjusts `dubbing` length based on `duration` (target: 3-4 chars/sec).
+**Step 4 (Translation):** Segments are merged by speaker continuity before being sent to the LLM in batches of 10. Each segment gets two outputs: `translation` (literal, for QA) and `dubbing` (colloquial, for TTS). A refinement pass adjusts `dubbing` length based on `duration` (target: 4-5 chars/sec).
 
-**Step 5 (TTS):** Uses Microsoft Edge TTS (`edge-tts`). Audio is time-stretched with FFmpeg's `atempo` filter to match the original segment's timestamp duration. `atempo` is limited to 0.5–2.0x, so the filter is chained when needed.
+**Step 5 (TTS):** Uses Microsoft Edge TTS (`edge-tts`). After generation, actual duration is measured; if atempo ratio falls outside `[0.85, 1.20]`, the LLM rewrites the dubbing and TTS is regenerated (up to 3 retries). A neighbor-smoothing pass then detects adjacent segments with ratio difference > 0.30 and rewrites the worse one. `atempo` is limited to 0.5–2.0x, so the filter is chained when needed.
 
 **Step 6 (Merge):** Uses pydub to overlay per-segment WAVs at their original timestamps onto a silent timeline. Final mix applies FFmpeg sidechain compression so background music ducks under vocals.
 
